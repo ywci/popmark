@@ -1,0 +1,33 @@
+#!/bin/bash
+
+OUTPUT=""
+RUNNER_RESULT1=0
+RUNNER_RESULT2=0
+
+while [[ $# -gt 0 ]]
+do
+    case "$1" in
+        --runner_result1)
+        RUNNER_RESULT1=$2
+        shift 2
+        ;;
+        --runner_result2)
+        RUNNER_RESULT2=$2
+        shift 2
+        ;;
+        --output)
+        OUTPUT=$2
+        shift 2
+        ;;
+        *)
+        echo "Error: invalid argument $1 of $0"
+        exit
+        ;;
+    esac
+done
+
+DIR=`dirname $OUTPUT`
+mkdir -p $DIR
+
+echo "runner_result1=$RUNNER_RESULT1">$OUTPUT
+echo "runner_result2=$RUNNER_RESULT2">>$OUTPUT

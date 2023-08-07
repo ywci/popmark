@@ -1,0 +1,33 @@
+#!/bin/bash
+
+OUTPUT=""
+SERVER_RESULT1=0
+SERVER_RESULT2=0
+
+while [[ $# -gt 0 ]]
+do
+    case "$1" in
+        --server_result1)
+        SERVER_RESULT1=$2
+        shift 2
+        ;;
+        --server_result2)
+        SERVER_RESULT2=$2
+        shift 2
+        ;;
+        --output)
+        OUTPUT=$2
+        shift 2
+        ;;
+        *)
+        echo "Error: invalid argument $1 of $0"
+        exit
+        ;;
+    esac
+done
+
+DIR=`dirname $OUTPUT`
+mkdir -p $DIR
+
+echo "server_result1=$SERVER_RESULT1">$OUTPUT
+echo "server_result2=$SERVER_RESULT2">>$OUTPUT
