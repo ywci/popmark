@@ -31,10 +31,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-apt-get install -y -qq python3-pip
+apt-get install -y -qq python3-pip rsync
 rm -rf $DIR/$ENV
 mkdir -p $DIR/$ENV
 for i in ${PACKAGES[@]}; do
+    # $INSTALLER install --break-system-packages --quiet $i
     $INSTALLER install --quiet $i
 done
 cp $DIR/$CONF $DIR/$ENV

@@ -12,8 +12,8 @@ from time import strptime
 from threading import Thread
 from datetime import datetime
 from workloads import WORKLOADS
-from statistics import mean, stdev
 from subprocess import getoutput, Popen
+from statistics import mean, stdev, median
 
 # Roles ###########
 SERVER = 'server'
@@ -55,10 +55,10 @@ def log_err(obj, s):
         s = log_get(obj, s)
     log(s, time=True, force=True)
     sys.exit(-1)
-    
+
 def log_file(s):
     with open(FILE_LOG, 'a') as f:
-        f.write('%s\n' % s)
+        f.write('%s %s\n' % (s, datetime.now()))
 
 def log_file_err(s):
     with open(FILE_LOG, 'a') as f:
@@ -74,12 +74,19 @@ def get_ip_addresses():
             addresses.append(res[IF_TYPE][0]['addr'])
     return addresses
 
+def get_output(cmd):
+    ret = getoutput(cmd)
+    if type(ret) != str:
+        ret = ret.decode('utf8')
+    return ret
+
 def get_members():
     members = []
     for i in [CLIENT, SERVER, RUNNER]:
-        for j in WORKLOADS['roles'][i]:
-            if j not in members:
-                members.append(j)
+        if i in WORKLOADS['roles']:
+            for j in WORKLOADS['roles'][i]:
+                if j not in members:
+                    members.append(j)
     return members
 
 def get_addr():
@@ -101,7 +108,7 @@ def kill_defunct_processes():
             parent.terminate()
     for proc in defunct_processes:
         proc.wait()
-    
+
 def remote_copy(addr, src, dest=None):
     if not dest:
         dest = src
@@ -125,7 +132,7 @@ def remote_call(addr, cmd, quiet=True, background=True):
             cmd_str = 'sshpass -p %s ssh -o StrictHostKeyChecking=no %s@%s "%s"' % (PASSWORD, USER, addr, cmd)
         if SHOW_CMD:
             print(cmd_str)
-        return getoutput(cmd_str)
+        return get_output(cmd_str)
     else:
         if not USER or not PASSWORD:
             cmd_str = 'ssh%s -o StrictHostKeyChecking=no %s "%s"' % (' -f' if background else '', addr, cmd)
@@ -170,10 +177,10 @@ def remote_reboot(addr):
                         check=False)
     else:
         subprocess.run(['sshpass', '-p', PASSWORD, 'ssh', '-o', 'StrictHostKeyChecking=no', '%s@%s' % (USER, addr), 'reboot'],
-                       shell=False,
-                       stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE,
-                       check=False)
+                        shell=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        check=False)
 
 def reboot_members():
     for i in get_members():
@@ -184,18 +191,21 @@ def start_member(addr, role, start, repeats):
 
 def start_members(start, repeats):
     for role in [SERVER, CLIENT, RUNNER]:
-        for addr in WORKLOADS['roles'][role]:
-            th = Thread(target=start_member, args=(addr, role, start, repeats))
-            th.start()
+        if role in WORKLOADS['roles']:
+            for addr in WORKLOADS['roles'][role]:
+                log_file("start %s (role=%s)" % (addr, role))
+                th = Thread(target=start_member, args=(addr, role, start, repeats))
+                th.start()
 
 def reset():
     addr_list = []
     for role in [SERVER, CLIENT, RUNNER]:
-        for addr in WORKLOADS['roles'][role]:
-            if addr not in addr_list:
-                addr_list.append(addr)
-                for i in WORKLOADS['collector']:
-                    remote_call(addr, 'rm -f %s' % i)
+        if role in WORKLOADS['roles']:
+            for addr in WORKLOADS['roles'][role]:
+                if addr not in addr_list:
+                    addr_list.append(addr)
+                    for i in WORKLOADS['collector']:
+                        remote_call(addr, 'rm -f %s' % i)
 
 def launch(role, cmd):
     tmp = os.path.join(TMP, ".popmark.%s" % role)
@@ -245,7 +255,7 @@ def check_results():
             if os.path.exists(i):
                 cnt = 0
                 for param in WORKLOADS['collector']['outputs'][i]:
-                    val = getoutput('%s %s %s' % (GETVAL, i, param)).strip()
+                    val = get_output('%s %s %s' % (GETVAL, i, param)).strip()
                     if val != '':
                         results.update({param: val})
                         cnt = cnt + 1
@@ -258,22 +268,25 @@ def check_results():
             time.sleep(1)
     return results
 
-def get_avg(results):
+def gen_statistical_results(results):
     values = list(map(lambda v: float(v), results))
-    total = sum(values)
     avg = mean(values)
     dev = stdev(values)
-    return (total, avg, dev)
+    med = median(values)
+    total = sum(values)
+    return (avg, dev, med, total)
 
 def gen_output(path, name, results):
     if len(results) > 1:
-        total, avg, dev = get_avg(results)
-        with open(os.path.join(path, '%s.total' % name), 'w') as f:
-            f.write(str(total))
+        avg, dev, med, total = gen_statistical_results(results)
         with open(os.path.join(path, '%s.avg' % name), 'w') as f:
             f.write(str(avg))
         with open(os.path.join(path, '%s.dev' % name), 'w') as f:
             f.write(str(dev))
+        with open(os.path.join(path, '%s.med' % name), 'w') as f:
+            f.write(str(med))
+        with open(os.path.join(path, '%s.sum' % name), 'w') as f:
+            f.write(str(total))
     else:
         with open(os.path.join(path, '%s' % name), 'w') as f:
             f.write(str(results[0]))
@@ -290,6 +303,7 @@ def save_results(workload, results):
     fields = {}
     fields_avg = {}
     fields_dev = {}
+    fields_med = {}
     fields_total = {}
     path = os.path.join(OUTPUTS, workload)
     os.makedirs(path, exist_ok=True)
@@ -309,18 +323,19 @@ def save_results(workload, results):
                         fields.update({i: {}})
                     fields[i].update({param: res[i][0]})
                 else:
-                    total, avg, dev = get_avg(res[i])
-                    if i not in fields_total:
-                        fields_total.update({i: {}})
-                    fields_total[i].update({param: total})
-                    
+                    avg, dev, med, total = gen_statistical_results(res[i])
                     if i not in fields_avg:
                         fields_avg.update({i: {}})
                     fields_avg[i].update({param: avg})
-                    
                     if i not in fields_dev:
                         fields_dev.update({i: {}})
-                    fields_dev[i].update({param: dev})                    
+                    fields_dev[i].update({param: dev})
+                    if i not in fields_med:
+                        fields_med.update({i: {}})
+                    fields_med[i].update({param: med})
+                    if i not in fields_total:
+                        fields_total.update({i: {}})
+                    fields_total[i].update({param: total})
         else:
             gen_output(path, param, results[param])
     if fields:
@@ -329,5 +344,7 @@ def save_results(workload, results):
         gen_outputs(path, fields_avg, 'avg')
     if fields_dev:
         gen_outputs(path, fields_dev, 'dev')
+    if fields_med:
+        gen_outputs(path, fields_med, 'med')
     if fields_total:
-        gen_outputs(path, fields_total, 'total')
+        gen_outputs(path, fields_total, 'sum')

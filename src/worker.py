@@ -5,27 +5,30 @@ from popmark import *
 from workloads import WORKLOADS
 
 class Worker(object):
-    def __init__(self, role, start=0, repeats=0):
-        if os.path.exists(FILE_LOG):
-            os.remove(FILE_LOG)
-        
+    def __init__(self, role, start=0, repeats=0):        
         nr_repeats = WORKLOADS['repeats']
         if nr_repeats == None:
             log_file_err('the repeat times must be set')
         
-        if role not in [SERVER, CLIENT, RUNNER]:
+        if role not in [SERVER, CLIENT, RUNNER] or role not in WORKLOADS:
             log_file_err('this is an invalid role %s' % str(role))
+        
+        if 'roles' not in WORKLOADS or 'collector' not in WORKLOADS['roles']:
+            log_file_err('the field of roles is not correctly specified')
         
         addr = get_addr()
         if not addr:
-            log_file_err('only members can be set as workers')
+            log_file_err('this is an invalid worker')
+        
+        if 'workloads' not in WORKLOADS[role]:
+            log_file_err('no workload for %s' % role)
         
         if start < 0 or start > len(WORKLOADS[role]['workloads']):
             log_file_err('cannot start %s from number %s workload' % (role, start))
-
-        nr_client_workloads = len(WORKLOADS['client']['workloads'])
-        nr_server_workloads = len(WORKLOADS['server']['workloads'])
-        nr_runner_workloads = len(WORKLOADS['runner']['workloads'])
+        
+        nr_client_workloads = len(WORKLOADS['client']['workloads']) if 'workloads' in WORKLOADS['client'] else 0
+        nr_server_workloads = len(WORKLOADS['server']['workloads']) if 'workloads' in WORKLOADS['server'] else 0
+        nr_runner_workloads = len(WORKLOADS['runner']['workloads']) if 'workloads' in WORKLOADS['runner'] else 0
         self._workload_max = max(nr_client_workloads, nr_server_workloads, nr_runner_workloads)
         self._has_client = nr_client_workloads > 0
         self._has_server = nr_server_workloads > 0
@@ -53,10 +56,11 @@ class Worker(object):
         self._collect = addr in WORKLOADS['roles']['collector']
         if self._collect:
              for i in [CLIENT, SERVER, RUNNER]:
-                 if addr in WORKLOADS['roles'][i]:
+                 if i in WORKLOADS['roles'] and addr in WORKLOADS['roles'][i]:
                      if i != role:
                          self._collect = False
                      break
+        log_file("[%s] initialize" % role)
      
     def _get_req_addr(self):
         return req_addr(MANAGER_ADDR, MANAGER_PORT)
@@ -126,7 +130,7 @@ class Worker(object):
     def _terminate(self):
         self._process.terminate()
     
-    def run(self):        
+    def run(self):
         while True:
             name, workload = self._get_workload()
             if not name:
@@ -137,35 +141,36 @@ class Worker(object):
             
             while not self._request(BEGIN):
                 time.sleep(1)
-            
             if self._role == SERVER:
                 log_file("[%s] %s ==> %s" % (self._role, str(name), str(workload['cmd'])))
                 self._launch(workload['cmd'])
+            else:
+                log_file("[%s] %s ==> begin" % (self._role, str(name)))
             
             while not self._request(ENTER):
                 time.sleep(1)
-            
             if self._role == CLIENT:
                 log_file("[%s] %s ==> %s" % (self._role, str(name), str(workload['cmd'])))
                 self._launch(workload['cmd'])
+            else:
+                log_file("[%s] %s ==> enter" % (self._role, str(name)))
             
             while not self._request(READY):
                 pass
-            
             if self._role == RUNNER:
                 log_file("[%s] %s ==> %s" % (self._role, str(name), str(workload['cmd'])))
                 self._launch(workload['cmd'])
+            else:
+                log_file("[%s] %s ==> ready" % (self._role, str(name)))
             
             self._request(EXIT)
             log_file("[%s] %s ==> start=%d, repeats=%d (%s)" % (self._role, str(name), self._start, self._repeats, EXIT))
             while not self._request(END):
                 time.sleep(1)
-            
             self._repeats = self._repeats + 1
             if self._repeats == WORKLOADS['repeats']:
                 self._start = self._start + 1
                 self._repeats = 0
-            
             if WORKLOADS['reboot']:
                 reboot()
             else:

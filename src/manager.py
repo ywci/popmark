@@ -66,9 +66,10 @@ class Manager(object):
         for i in WORKLOADS['roles']['collector']:
             match = False
             for role in [CLIENT, SERVER, RUNNER]:
-                if i in WORKLOADS['roles'][role]:
-                    match = True
-                    break
+                if role in WORKLOADS['roles']:
+                    if i in WORKLOADS['roles'][role]:
+                        match = True
+                        break
             if not match:
                 raise Exception('collector %s should be a client/server/runner')
         
@@ -178,7 +179,7 @@ class Manager(object):
                         pos = 0
                     if self._start < self._workload_max:
                         if WORKLOADS['reboot']:
-                            t = Thread(target=self._restart, args=(pos))
+                            t = Thread(target=self._restart, args=(pos,))
                             t.start()
         finally:
             self._lock.release()

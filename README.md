@@ -29,7 +29,7 @@
 
 ## **Version**
 
-* 0.1
+* Current version is 0.1
 
 ## **License**
 
